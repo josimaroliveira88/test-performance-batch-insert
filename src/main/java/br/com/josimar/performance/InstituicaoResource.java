@@ -3,7 +3,9 @@ package br.com.josimar.performance;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import javax.enterprise.context.RequestScoped;
@@ -27,8 +29,6 @@ import io.vertx.core.json.Json;
 @Path("/instituicao")
 @Produces(MediaType.APPLICATION_JSON + ";charset=UTF-8")
 public class InstituicaoResource {
-    private static final int QUANTIDADE_CONTAS = 10000000;
-
     Logger LOG = Logger.getLogger(InstituicaoResource.class);
 
     @Inject
@@ -37,19 +37,17 @@ public class InstituicaoResource {
     @Inject
     InstituicaoBean bean;
 
+    @Inject
+    ContaUtil contaUtil;
+
+    @Inject
+    InstituicaoService instituicaoService;
+
     @Path("/saveall")
     @POST
     @Consumes(MediaType.APPLICATION_JSON + ";charset=UTF-8")
     public Response saveAll(List<Instituicao> instituicoes) {
-        instituicaoDao.deleteAll();
-        var listaTest = createInstituicoes();
-        LOG.info("list size: " + listaTest.size());
-        var initTime = System.currentTimeMillis();
-        LOG.info("init time: " + initTime);
-        instituicaoDao.saveAll(listaTest);
-        var endTime = System.currentTimeMillis();
-        LOG.info("end time: " + endTime);
-        LOG.info("duration: " + (endTime - initTime));
+        instituicaoService.saveInst();
         // return a list of instituicoes
         return Response.ok().entity(instituicaoDao.listInstituicoes()).build();
     }
@@ -134,7 +132,7 @@ public class InstituicaoResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Conta findConta(@QueryParam("codigoInstituicao") int codigoInstituicao,
             @QueryParam("codigoTipoPlano") int codigoTipoPlano, @QueryParam("numeroConta") int numeroConta) {
-        var lista = createContas();
+        var lista = contaUtil.getContas();
 
         var initTime = System.currentTimeMillis();
         LOG.info("init time before find: " + initTime);
@@ -142,95 +140,26 @@ public class InstituicaoResource {
         var endTime = System.currentTimeMillis();
         LOG.info("end time after find: " + endTime);
         LOG.info("duration of find: " + (endTime - initTime));
-        return conta;
-    }
-    @GET
-    @Path("/contas-bs")
-    @Produces(MediaType.APPLICATION_JSON)
-    public Conta findContaWithBinarySearch(@QueryParam("codigoInstituicao") int codigoInstituicao,
-            @QueryParam("codigoTipoPlano") int codigoTipoPlano, @QueryParam("numeroConta") int numeroConta) {
-        var lista = createContas();
 
-        var initTime = System.currentTimeMillis();
-        LOG.info("init time before find: " + initTime);
-        var conta = findContaByIdWithBinarySearch(codigoInstituicao, codigoTipoPlano, numeroConta, lista);
-        var endTime = System.currentTimeMillis();
-        LOG.info("end time after find: " + endTime);
-        LOG.info("duration of find: " + (endTime - initTime));
+        // clear the object to avoid memory leaks and decrease memory usage
+        lista = null;
+
         return conta;
     }
 
-    private List<Conta> createContas() {
-        List<Conta> contas = new ArrayList<>();
-        // create a random number between 1 and 10000
-        var random = new Random();
-        int numeroAleatorio = random.nextInt(QUANTIDADE_CONTAS) + 1;
-        for (int i = 1; i < QUANTIDADE_CONTAS + 1; i++) {
-            var conta = new Conta();
-            conta.setCodigoInstituicao(i);
-            conta.setCodigoTipoPlano(i);
-            if (i == numeroAleatorio) {
-                conta.setNumeroConta(42);
-                conta.setCodigoInstituicao(42+QUANTIDADE_CONTAS);
-                conta.setCodigoTipoPlano(42+QUANTIDADE_CONTAS);
-                conta.setNomeConta("Conta foi encontrada");
-            } else {
-                var numeroConta = random.nextInt(QUANTIDADE_CONTAS) + 1;
-                if (numeroConta == 42) {
-                    conta.setNumeroConta(numeroConta+1);
-                    conta.setNomeConta("nome" + conta.getNumeroConta());
-                } else {
-                    conta.setNumeroConta(numeroConta);
-                    conta.setNomeConta("nome" + conta.getNumeroConta());
-                }
-            }
-            contas.add(conta);
-            if (i == numeroAleatorio) {
-                LOG.info("Conta a ser encontrada no index " + i + ": " + conta);
-            }
-
-            if (i == 0) {
-                LOG.info("First conta created: " + conta);
-            }
-        }
-
-        LOG.info("First conta before sort: " + contas.get(0));
-
-        // log the initial timestamp
-        var initTime = System.currentTimeMillis();
-        LOG.info("init time: " + initTime);
-        // order by codigoInstituicao, codigoTipoPlano, numeroConta
-        contas.sort(Comparator.comparing(Conta::getCodigoInstituicao)
-                .thenComparing(Conta::getCodigoTipoPlano)
-                .thenComparing(Conta::getNumeroConta));
-        // log the end timestamp
-        var endTime = System.currentTimeMillis();
-        LOG.info("end time: " + endTime);
-        // log the duration
-        LOG.info("duration: " + (endTime - initTime));
-        LOG.info("First conta after sort: " + contas.get(0));
-        LOG.info("Last conta after sort: " + contas.get(contas.size() - 1));
-
-
-        return contas;
-    }
-
-    private Conta findContaById(int codigoInstituicao, int codigoTipoPlano, int numeroConta, List<Conta> contas) {
-        Conta contaBuscada = new Conta(codigoInstituicao, codigoTipoPlano, numeroConta, "");
+    private Conta findContaById(int codigoInstituicao, int codigoTipoPlano, int numeroConta, Map<ContaId, Conta> lista) {
+        ContaId contaBuscada = new ContaId(codigoInstituicao, codigoTipoPlano, numeroConta);
         LOG.info("Conta busca " + contaBuscada);
 
-        var indice=0;
-        for (Conta conta : contas) {
-            if (conta.getCodigoInstituicao() == contaBuscada.getCodigoInstituicao()
-                    && conta.getCodigoTipoPlano() == contaBuscada.getCodigoTipoPlano()
-                    && conta.getNumeroConta() == contaBuscada.getNumeroConta()) {
-                LOG.info("Conta foi encontrada no index: " + indice);
-                return conta;
-            }
+        // var indice=0;
 
-            indice++;
+        if (lista.containsKey(contaBuscada)) {
+            LOG.info("Conta foi encontrada pela chave: " + contaBuscada);
+            return lista.get(contaBuscada);
+        } else {
+            LOG.info("Conta nao foi encontrada");
+            return null;
         }
-        return null;
     }
 
     private Conta findContaByIdWithBinarySearch(int codigoInstituicao, int codigoTipoPlano, int numeroConta, List<Conta> contas) {
